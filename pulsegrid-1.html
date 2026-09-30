@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PulseGrid — medicine stock-out forecasting for Primary Health Centres</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#E4ECE9;--panel:#F6FAF8;--ink:#12312F;--mute:#5A716E;--line:#C5D3CF;--red:#D3372A;--amber:#E0A100;--green:#2E8B6A;--teal:#0E6E6E;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0D1918;--panel:#152625;--ink:#DCEBE8;--mute:#8FA8A4;--line:#294341;--red:#F0604F;--amber:#F0BA2A;--green:#48B58E;--teal:#4CC4C4}}
+:root[data-theme="dark"]{--bg:#0D1918;--panel:#152625;--ink:#DCEBE8;--mute:#8FA8A4;--line:#294341;--red:#F0604F;--amber:#F0BA2A;--green:#48B58E;--teal:#4CC4C4}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif}
+h1,h2{font-family:"Bricolage Grotesque","IBM Plex Sans",sans-serif;margin:0}
+header{display:flex;flex-wrap:wrap;gap:14px 28px;align-items:end;padding:18px 20px 8px}
+h1{font-size:34px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.tag{color:var(--mute);margin:4px 0 0;max-width:38ch}
+.ctl{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:end;margin-left:auto}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:4px}
+select,input[type=text]{font:inherit;padding:7px 10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;min-width:0}
+input[type=range]{width:200px;accent-color:var(--teal)}
+main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(310px,1fr);gap:16px;padding:8px 20px 28px}
+@media(max-width:900px){main{grid-template-columns:1fr}.ctl{margin-left:0}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+canvas{display:block;width:100%;aspect-ratio:5/3;cursor:crosshair}
+.chips{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:10px;font-size:14px}
+.chips b{font-variant-numeric:tabular-nums}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:-4px 0 12px;overflow-x:auto}
+.tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:8px 10px;font:inherit;color:var(--mute);cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected=true]{color:var(--ink);border-color:var(--teal);font-weight:600}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.pn{display:none}.pn.on{display:block}
+.mv{padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.mv:last-child{border:0}
+.btn{background:var(--teal);color:#fff;border:0;border-radius:6px;padding:7px 12px;font:inherit;font-weight:600;cursor:pointer}
+html[data-theme=dark] .btn,:root:not([data-theme=light]) .btn{color:#062020}
+.btn.ghost{background:none;color:var(--teal);border:1px solid var(--teal);padding:4px 10px;margin-top:6px}
+.mute{color:var(--mute);font-size:13px}
+.bar{height:10px;border-radius:5px;background:var(--teal);margin:4px 0 2px}
+.scroll{overflow-x:auto}
+h2{font-size:19px;margin-bottom:6px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+@media(prefers-reduced-motion:no-preference){.bar{transition:width .5s}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>PulseGrid</h1><p class="tag">Know which clinics run out of medicine before they do, and where the stock should come from.</p></div>
+  <div class="ctl">
+    <label>Medicine<select id="med"></select></label>
+    <label>Outbreak pressure: <span id="ov">0%</span><input id="out" type="range" min="0" max="100" value="0" aria-label="Outbreak pressure"></label>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <canvas id="cv" aria-label="Map of health centres coloured by days of stock left"></canvas>
+    <div class="chips" id="chips"></div>
+    <p class="mute">Synthetic data for <span id="cnt"></span> health centres in six districts. Click a centre to open its forecast.</p>
+  </section>
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-t="plan">Transfers</button>
+      <button role="tab" aria-selected="false" data-t="fac">Health centre</button>
+      <button role="tab" aria-selected="false" data-t="scale">Scale</button>
+      <button role="tab" aria-selected="false" data-t="net">BRICS network</button>
+    </div>
+    <div class="pn on" id="plan"></div>
+    <div class="pn" id="fac">
+      <h2 id="ft">Select a health centre</h2><div id="fs" class="mute"></div>
+      <canvas id="fc" style="aspect-ratio:2/1;cursor:default"></canvas>
+      <p class="mute">Solid line is expected stock. The shaded band covers demand 20% lower to 20% higher.</p>
+      <label>Field report (text or voice transcript)<input type="text" id="txt" value="ORS 40 left, 2 staff absent"></label>
+      <div class="row"><button class="btn" id="rep">Update from report</button></div>
+      <p class="mute">In production, Gemini turns a WhatsApp voice note or shelf photo into these numbers. Here a simple parser stands in.</p>
+    </div>
+    <div class="pn" id="scale">
+      <h2>Runs at national scale</h2>
+      <p class="mute">Each button plans transfers for that many health centres, live, in your browser. Districts are independent shards, so more centres means more parallel workers, not a slower plan.</p>
+      <div class="row" id="sb"></div>
+      <div id="sr"></div>
+      <div class="mv"><b>Design for growth</b><br>Shard by district, run stateless planner workers, ingest reports as an event stream, and let a coordinator handle only cross-district spillover.</div>
+    </div>
+    <div class="pn" id="net">
+      <h2>Share models, not patients</h2>
+      <p class="mute">Each country trains a demand model on its own records. Only model weights are shared, so no patient data crosses a border. Simulated illustration.</p>
+      <div id="nb"></div>
+      <div class="row"><button class="btn" id="rd">Run training round</button><span class="mute" id="rl">Round 0</span></div>
+    </div>
+  </section>
+</main>
+<script>
+const $=s=>document.querySelector(s),C=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const MEDS=[{n:'ORS sachets',k:2.6},{n:'Paracetamol',k:1.4},{n:'Amoxicillin',k:1.8},{n:'Antimalarial',k:3}];
+const DIST=[[200,150],[520,120],[800,190],[300,400],[620,380],[850,460]];
+let seed=7;const rnd=()=>(seed=seed*16807%2147483647)/2147483647;
+let P=[],m=0,o=0,sel=null,plan=[];
+const dem=p=>p.dm[m]*(1+(MEDS[m].k-1)*o/100),days=p=>p.s[m]/dem(p);
+function gen(n){seed=7;P=[];for(let i=0;i<n;i++){const d=i%6,g=()=>(rnd()+rnd()+rnd()-1.5)*90;
+const p={i,d,x:Math.min(980,Math.max(20,DIST[d][0]+g())),y:Math.min(580,Math.max(20,DIST[d][1]+g()*.8)),dm:[],s:[],abs:0};
+MEDS.forEach(()=>{const a=6+rnd()*12,r=rnd();p.dm.push(a);p.s.push(a*(r<.16?rnd()*7:r<.4?45+rnd()*30:9+rnd()*26))});P.push(p)}}
+function replan(){const cs=60,g=new Map();
+P.forEach(p=>{p.sp=p.s[m]-dem(p)*25;if(p.sp>0){const k=(p.x/cs|0)+(p.y/cs|0)*100;(g.get(k)||g.set(k,[]).get(k)).push(p)}});
+plan=[];const sh=P.filter(p=>days(p)<7).sort((a,b)=>days(a)-days(b));
+sh.forEach(p=>{let need=dem(p)*14-p.s[m];const cx=p.x/cs|0,cy=p.y/cs|0;
+for(let r=0;r<=4&&need>0;r++)for(let a=cx-r;a<=cx+r;a++)for(let b=cy-r;b<=cy+r;b++){if(Math.max(Math.abs(a-cx),Math.abs(b-cy))!==r)continue;
+for(const d of g.get(a+b*100)||[]){if(need<=0||d.sp<=0)continue;const q=Math.min(d.sp,need);d.sp-=q;need-=q;plan.push({f:d,t:p,q:Math.round(q),km:Math.round(Math.hypot(d.x-p.x,d.y-p.y)*.4)})}}});
+plan=plan.filter(t=>t.q>0)}
+const cv=$('#cv'),cx=cv.getContext('2d');
+function fit(c){const r=devicePixelRatio||1;c.width=c.clientWidth*r;c.height=c.clientHeight*r}
+function draw(){fit(cv);const k=cv.width/1000;cx.setTransform(k,0,0,k,0,0);cx.clearRect(0,0,1000,600);
+cx.fillStyle=C('--teal');cx.globalAlpha=.07;DIST.forEach(d=>{cx.beginPath();cx.arc(d[0],d[1],120,0,7);cx.fill()});cx.globalAlpha=1;
+cx.strokeStyle=C('--teal');cx.lineWidth=1.4;cx.globalAlpha=.55;
+plan.slice(0,80).forEach(t=>{cx.beginPath();cx.moveTo(t.f.x,t.f.y);cx.quadraticCurveTo((t.f.x+t.t.x)/2,(t.f.y+t.t.y)/2-30,t.t.x,t.t.y);cx.stroke()});cx.globalAlpha=1;
+const col=p=>{const d=days(p);return d<7?'--red':d<14?'--amber':'--green'};
+[['--green',3],['--amber',4],['--red',5.5]].forEach(([c,r])=>{cx.fillStyle=C(c);P.forEach(p=>{if(col(p)===c){cx.beginPath();cx.arc(p.x,p.y,r,0,7);cx.fill()}})});
+if(sel){cx.strokeStyle=C('--ink');cx.lineWidth=2.5;cx.beginPath();cx.arc(sel.x,sel.y,11,0,7);cx.stroke()}
+const n=[0,0,0];P.forEach(p=>n[days(p)<7?0:days(p)<14?1:2]++);
+$('#chips').innerHTML=[['--red','Under 7 days',n[0]],['--amber','7 to 14 days',n[1]],['--green','Healthy',n[2]]].map(a=>`<span><i class="dot" style="background:${C(a[0])}"></i>${a[1]}: <b>${a[2]}</b></span>`).join('')+`<span><i class="dot" style="background:${C('--teal')}"></i>Suggested transfers: <b>${plan.length}</b></span>`}
+function list(){const el=$('#plan');const top=plan.slice(0,8);
+el.innerHTML=`<h2>Suggested transfers</h2><p class="mute">${plan.length?`${plan.length} transfers to keep every centre above 14 days of ${MEDS[m].n}. Showing the 8 most urgent.`:'No transfers needed. Raise outbreak pressure to see the plan react.'}</p>`+top.map((t,i)=>`<div class="mv">Move <b>${t.q}</b> ${MEDS[m].n} from centre ${t.f.i} (${Math.round(t.f.s[m]/dem(t.f))} days of cover) to centre ${t.t.i} (${days(t.t).toFixed(1)} days left). ${t.km} km by road.<br><button class="btn ghost" data-a="${i}">Approve</button></div>`).join('')+(plan.length?`<div class="row"><button class="btn" id="all">Approve all ${plan.length}</button></div>`:'');
+el.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>apply([plan[b.dataset.a]]));const a=$('#all');if(a)a.onclick=()=>apply(plan)}
+function apply(ts){ts.forEach(t=>{t.f.s[m]-=t.q;t.t.s[m]+=t.q});refresh()}
+function refresh(){replan();draw();list();if(sel)fac()}
+function fac(){const p=sel,d=days(p);$('#ft').textContent='Centre '+p.i+', district '+(p.d+1);
+$('#fs').textContent=`${MEDS[m].n}: ${Math.round(p.s[m])} in stock, using about ${dem(p).toFixed(1)} a day. Empty in ${d.toFixed(1)} days. ${p.abs} staff absent.`;
+const c=$('#fc'),x=c.getContext('2d');fit(c);const W=c.width,H=c.height,r=devicePixelRatio||1;x.clearRect(0,0,W,H);
+const mx=Math.max(p.s[m],1),X=t=>30*r+t/30*(W-40*r),Y=v=>H-16*r-v/mx*(H-30*r),D=dem(p);
+x.fillStyle=C('--teal');x.globalAlpha=.18;x.beginPath();x.moveTo(X(0),Y(p.s[m]));for(let t=0;t<=30;t++)x.lineTo(X(t),Y(Math.max(0,p.s[m]-D*.8*t)));for(let t=30;t>=0;t--)x.lineTo(X(t),Y(Math.max(0,p.s[m]-D*1.2*t)));x.fill();x.globalAlpha=1;
+x.strokeStyle=C('--teal');x.lineWidth=2.5*r;x.beginPath();for(let t=0;t<=30;t++)x[t?'lineTo':'moveTo'](X(t),Y(Math.max(0,p.s[m]-D*t)));x.stroke();
+x.strokeStyle=C('--line');x.lineWidth=r;x.beginPath();x.moveTo(X(0),Y(0));x.lineTo(X(30),Y(0));x.moveTo(X(14),Y(0));x.lineTo(X(14),Y(mx));x.stroke();
+x.fillStyle=C('--mute');x.font=11*r+'px sans-serif';x.fillText('day 0',X(0),H-3*r);x.fillText('14',X(14)-6*r,H-3*r);x.fillText('30',X(30)-8*r,H-3*r)}
+function pick(p){sel=p;tab('fac');draw();fac()}
+cv.onclick=e=>{const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*1000,y=(e.clientY-r.top)/r.height*600;
+let b=null,bd=16;P.forEach(p=>{const d=Math.hypot(p.x-x,p.y-y);if(d<bd){bd=d;b=p}});if(b)pick(b)};
+function tab(t){document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.t===t));document.querySelectorAll('.pn').forEach(p=>p.classList.toggle('on',p.id===t));if(t==='fac'&&sel)fac()}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>tab(b.dataset.t));
+$('#med').innerHTML=MEDS.map((a,i)=>`<option value="${i}">${a.n}</option>`).join('');
+$('#med').onchange=e=>{m=+e.target.value;refresh()};
+$('#out').oninput=e=>{o=+e.target.value;$('#ov').textContent=o+'%';refresh()};
+$('#rep').onclick=()=>{if(!sel)return;const t=$('#txt').value.toLowerCase();
+MEDS.forEach((a,k)=>{const r=t.match(new RegExp(a.n.split(' ')[0].toLowerCase()+'\\D{0,12}(\\d+)'));if(r)sel.s[k]=+r[1]});
+const s=t.match(/(\d+)\s*staff/);if(s)sel.abs=+s[1];refresh()};
+function bench(N){const side=1000*Math.sqrt(N/500),cs=60,W=Math.ceil(side/cs)+1;seed=11;
+const x=new Float32Array(N),y=new Float32Array(N),st=new Float32Array(N),dm=new Float32Array(N);
+for(let i=0;i<N;i++){x[i]=rnd()*side;y[i]=rnd()*side;dm[i]=6+rnd()*12;const r=rnd();st[i]=dm[i]*(r<.16?rnd()*7:r<.4?45+rnd()*30:9+rnd()*26)}
+const t0=performance.now(),head=new Int32Array(W*W).fill(-1),nx=new Int32Array(N);
+for(let i=0;i<N;i++)if(st[i]-dm[i]*25>0){const c=(x[i]/cs|0)+(y[i]/cs|0)*W;nx[i]=head[c];head[c]=i}
+let mv=0,un=0;for(let i=0;i<N;i++){if(st[i]/dm[i]>=7)continue;let need=dm[i]*14-st[i];const px=x[i]/cs|0,py=y[i]/cs|0;
+for(let r=0;r<=4&&need>0;r++)for(let a=Math.max(0,px-r);a<=Math.min(W-1,px+r);a++)for(let b=Math.max(0,py-r);b<=Math.min(W-1,py+r);b++){if(Math.max(Math.abs(a-px),Math.abs(b-py))!==r)continue;
+for(let j=head[a+b*W];j>=0&&need>0;j=nx[j]){const sp=st[j]-dm[j]*25;if(sp<=0)continue;const q=Math.min(sp,need);st[j]-=q;need-=q;mv++}}
+if(need>0)un++}
+return{ms:performance.now()-t0,mv,un}}
+const runs=[];
+$('#sb').innerHTML=[1e3,1e4,1e5,5e5].map(n=>`<button class="btn" data-n="${n}">${n.toLocaleString()} centres</button>`).join('');
+document.querySelectorAll('#sb button').forEach(b=>b.onclick=()=>{const n=+b.dataset.n;b.textContent='Running...';setTimeout(()=>{const r=bench(n);runs.push({n,...r});b.textContent=n.toLocaleString()+' centres';
+const mx=Math.max(...runs.map(a=>a.ms));$('#sr').innerHTML=runs.map(a=>`<div class="mv"><b>${a.n.toLocaleString()}</b> centres planned in <b>${a.ms<1?'<1':Math.round(a.ms)} ms</b><div class="bar" style="width:${Math.max(3,a.ms/mx*100)}%"></div><span class="mute">${a.mv.toLocaleString()} transfers, ${a.un.toLocaleString()} shortages with no nearby surplus</span></div>`).join('')},30)});
+const NODES=[['India',24],['Brazil',27],['South Africa',31]];let rd=0;
+function net(){$('#nb').innerHTML=NODES.map(([n,e])=>{const f=Math.round(5+(e-5)*.72**rd);return`<div class="mv"><b>${n}</b>: forecast error <b>${f}%</b> <span class="mute">(${e}% training alone)</span><div class="bar" style="width:${f*3}%"></div></div>`}).join('');$('#rl').textContent='Round '+rd}
+$('#rd').onclick=()=>{rd=Math.min(rd+1,8);net()};
+gen(500);$('#cnt').textContent=P.length;replan();
+sel=P.slice().sort((a,b)=>days(a)-days(b))[0];draw();list();net();
+addEventListener('resize',()=>{draw();if(sel&&$('#fac').classList.contains('on'))fac()});
+</script>
+</body>
+</html>
